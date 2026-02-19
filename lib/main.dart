@@ -42,6 +42,16 @@ class _HomeScreenState extends State<HomeScreen> {
   Set<Marker> _markers = {};
   int _selectedIndex = 0;
 
+  //store selected station
+  Map<String, dynamic>? _selectedStation;
+
+  void _selectStation(Map<String, dynamic> station) {
+    setState(() {
+      _selectedStation = station;
+    });
+  }
+
+
   final Color primaryGreen = const Color(0xFF12B886);
 
   @override
@@ -84,6 +94,19 @@ class _HomeScreenState extends State<HomeScreen> {
               info["Latitude"] != null &&
               info["Longitude"] != null) {
 
+            // newMarkers.add(
+            //   Marker(
+            //     markerId: MarkerId(station["ID"].toString()),
+            //     position: LatLng(
+            //       (info["Latitude"] as num).toDouble(),
+            //       (info["Longitude"] as num).toDouble(),
+            //     ),
+            //     infoWindow: InfoWindow(
+            //       title: info["Title"] ?? "Charging Station",
+            //       snippet: info["AddressLine1"] ?? "",
+            //     ),
+            //   ),
+            // );
             newMarkers.add(
               Marker(
                 markerId: MarkerId(station["ID"].toString()),
@@ -91,12 +114,15 @@ class _HomeScreenState extends State<HomeScreen> {
                   (info["Latitude"] as num).toDouble(),
                   (info["Longitude"] as num).toDouble(),
                 ),
-                infoWindow: InfoWindow(
-                  title: info["Title"] ?? "Charging Station",
-                  snippet: info["AddressLine1"] ?? "",
+                icon: BitmapDescriptor.defaultMarkerWithHue(
+                  BitmapDescriptor.hueGreen,
                 ),
+                onTap: () {
+                  _selectStation(station);
+                },
               ),
             );
+
           }
         }
 
@@ -196,6 +222,71 @@ class _HomeScreenState extends State<HomeScreen> {
     await fetchStations(position.latitude, position.longitude);
   }
 
+  //station bottom card ui
+  Widget _buildStationCard() {
+    final info = _selectedStation!["AddressInfo"];
+    final connections = _selectedStation!["Connections"];
+
+    String connector = "Unknown";
+    String power = "Unknown";
+
+    if (connections != null && connections.isNotEmpty) {
+      connector = connections[0]["ConnectionType"]?["Title"] ?? "Unknown";
+      power = connections[0]["PowerKW"]?.toString() ?? "Unknown";
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.2),
+            blurRadius: 10,
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            info["Title"] ?? "Charging Station",
+            style: const TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text("Connector: $connector"),
+          Text("Power: $power kW"),
+          const SizedBox(height: 12),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              ElevatedButton.icon(
+                onPressed: () {
+                  print("Added to favourites");
+                },
+                icon: const Icon(Icons.favorite),
+                label: const Text("Add to Favourites"),
+              ),
+              IconButton(
+                onPressed: () {
+                  setState(() {
+                    _selectedStation = null;
+                  });
+                },
+                icon: const Icon(Icons.close),
+              )
+            ],
+          )
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -239,6 +330,15 @@ class _HomeScreenState extends State<HomeScreen> {
               _mapController = controller;
             },
           ),
+
+          if (_selectedStation != null)
+            Positioned(
+              bottom: 20,
+              left: 16,
+              right: 16,
+              child: _buildStationCard(),
+            ),
+
 
           /// 🔍 Dummy Search Bar
           Positioned(
