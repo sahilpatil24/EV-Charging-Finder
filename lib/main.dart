@@ -4,11 +4,16 @@ import 'package:geolocator/geolocator.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'screens/login_screen.dart';
 
+import 'package:firebase_core/firebase_core.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp();
   runApp(const MyApp());
 }
+
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
@@ -23,7 +28,7 @@ class MyApp extends StatelessWidget {
           seedColor: const Color(0xFF087F5B),
         ),
       ),
-      home: const HomeScreen(),
+      home: const LoginScreen(),
     );
   }
 }
@@ -65,7 +70,7 @@ class _HomeScreenState extends State<HomeScreen> {
             "?output=json"
             "&latitude=$lat"
             "&longitude=$lon"
-            "&distance=15"
+            "&distance=1500"
             "&distanceunit=KM"
             "&maxresults=20"
     );
