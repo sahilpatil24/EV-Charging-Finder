@@ -76,69 +76,143 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text("EV Charging Finder")),
-      body: Center(
+      body: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Form(
-            key: _formKey,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  isLogin ? "Login" : "Register",
-                  style: const TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 20),
+          padding: const EdgeInsets.symmetric(horizontal: 24),
+          child: Center(
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const SizedBox(height: 40),
 
-                TextFormField(
-                  controller: _emailController,
-                  decoration: const InputDecoration(labelText: "Email"),
-                  validator: (value) =>
-                  value!.contains("@") ? null : "Enter valid email",
-                ),
-
-                const SizedBox(height: 10),
-
-                TextFormField(
-                  controller: _passwordController,
-                  decoration: const InputDecoration(labelText: "Password"),
-                  obscureText: true,
-                  validator: (value) =>
-                  value!.length >= 6 ? null : "Min 6 characters",
-                ),
-
-                const SizedBox(height: 20),
-
-                if (isLoading)
-                  const CircularProgressIndicator()
-                else
-                  ElevatedButton(
-                    onPressed: authenticate,
-                    child: Text(isLogin ? "Login" : "Register"),
+                  // EV Icon
+                  Container(
+                    height: 70,
+                    width: 70,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF00C853).withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: const Icon(
+                      Icons.electric_car,
+                      size: 36,
+                      color: Color(0xFF00C853),
+                    ),
                   ),
 
-                TextButton(
-                  onPressed: () {
-                    setState(() => isLogin = !isLogin);
-                  },
-                  child: Text(
+                  const SizedBox(height: 30),
+
+                  const Text(
+                    "Welcome Back",
+                    style: TextStyle(
+                      fontSize: 28,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+
+                  const SizedBox(height: 8),
+
+                  Text(
                     isLogin
-                        ? "Don't have an account? Register"
-                        : "Already have an account? Login",
+                        ? "Login to continue your EV journey"
+                        : "Create your EV account",
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: Colors.grey.shade400,
+                    ),
                   ),
-                ),
 
-                const Divider(height: 30),
+                  const SizedBox(height: 30),
 
-                ElevatedButton(
-                  onPressed: signInWithGoogle,
-                  child: const Text("Sign in with Google"),
-                ),
-              ],
+                  Form(
+                    key: _formKey,
+                    child: Column(
+                      children: [
+                        TextFormField(
+                          controller: _emailController,
+                          decoration: const InputDecoration(
+                            hintText: "Email address",
+                          ),
+                          validator: (value) =>
+                          value!.contains("@") ? null : "Enter valid email",
+                        ),
+
+                        const SizedBox(height: 16),
+
+                        TextFormField(
+                          controller: _passwordController,
+                          decoration: const InputDecoration(
+                            hintText: "Password",
+                          ),
+                          obscureText: true,
+                          validator: (value) =>
+                          value!.length >= 6 ? null : "Minimum 6 characters",
+                        ),
+
+                        const SizedBox(height: 24),
+
+                        isLoading
+                            ? const CircularProgressIndicator()
+                            : SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton(
+                            onPressed: authenticate,
+                            child: Text(
+                              isLogin ? "Login" : "Register",
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ),
+
+                        const SizedBox(height: 16),
+
+                        Center(
+                          child: TextButton(
+                            onPressed: () {
+                              setState(() => isLogin = !isLogin);
+                            },
+                            child: Text(
+                              isLogin
+                                  ? "Don’t have an account? Register"
+                                  : "Already have an account? Login",
+                              style: const TextStyle(
+                                color: Color(0xFF00C853),
+                              ),
+                            ),
+                          ),
+                        ),
+
+                        const SizedBox(height: 20),
+
+                        const Divider(),
+
+                        const SizedBox(height: 16),
+
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            onPressed: signInWithGoogle,
+                            icon: const Icon(Icons.login),
+                            label: const Text("Continue with Google"),
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 16),
+                              side: const BorderSide(
+                                color: Color(0xFF00C853),
+                              ),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -146,5 +220,78 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 }
+//   @override
+//   Widget build(BuildContext context) {
+//     return Scaffold(
+//       appBar: AppBar(title: const Text("EV Charging Finder")),
+//       body: Center(
+//         child: Padding(
+//           padding: const EdgeInsets.all(20),
+//           child: Form(
+//             key: _formKey,
+//             child: Column(
+//               mainAxisSize: MainAxisSize.min,
+//               children: [
+//                 Text(
+//                   isLogin ? "Login" : "Register",
+//                   style: const TextStyle(
+//                     fontSize: 24,
+//                     fontWeight: FontWeight.bold,
+//                   ),
+//                 ),
+//                 const SizedBox(height: 20),
+//
+//                 TextFormField(
+//                   controller: _emailController,
+//                   decoration: const InputDecoration(labelText: "Email"),
+//                   validator: (value) =>
+//                   value!.contains("@") ? null : "Enter valid email",
+//                 ),
+//
+//                 const SizedBox(height: 10),
+//
+//                 TextFormField(
+//                   controller: _passwordController,
+//                   decoration: const InputDecoration(labelText: "Password"),
+//                   obscureText: true,
+//                   validator: (value) =>
+//                   value!.length >= 6 ? null : "Min 6 characters",
+//                 ),
+//
+//                 const SizedBox(height: 20),
+//
+//                 if (isLoading)
+//                   const CircularProgressIndicator()
+//                 else
+//                   ElevatedButton(
+//                     onPressed: authenticate,
+//                     child: Text(isLogin ? "Login" : "Register"),
+//                   ),
+//
+//                 TextButton(
+//                   onPressed: () {
+//                     setState(() => isLogin = !isLogin);
+//                   },
+//                   child: Text(
+//                     isLogin
+//                         ? "Don't have an account? Register"
+//                         : "Already have an account? Login",
+//                   ),
+//                 ),
+//
+//                 const Divider(height: 30),
+//
+//                 ElevatedButton(
+//                   onPressed: signInWithGoogle,
+//                   child: const Text("Sign in with Google"),
+//                 ),
+//               ],
+//             ),
+//           ),
+//         ),
+//       ),
+//     );
+//   }
+// }
 
 // Dummy HomeScreen (Replace with your actual map screen)
