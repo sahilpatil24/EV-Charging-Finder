@@ -10,10 +10,15 @@ import 'screens/favorites_screen.dart';
 import 'screens/profile_screen.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp();
+  // await Supabase.initialize(
+  //   url: 'https://djdbmgqhqouxhrtmktbg.supabase.co',
+  //   anonKey: 'sb_publishable_RdbPF8kPDe06t_aBc09-Yw_bZtqBYo1',
+  // );
   runApp(const MyApp());
 }
 

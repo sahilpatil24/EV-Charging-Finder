@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:image_picker/image_picker.dart';
+import 'dart:io';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -17,6 +20,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
   final TextEditingController addressController = TextEditingController();
 
   bool isLoading = true;
+  bool isEditing = false;
+  String? photoUrl;
+  File? _imageFile;
 
   @override
   void initState() {
@@ -37,6 +43,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       usernameController.text = data["username"] ?? "";
       phoneController.text = data["phone"] ?? "";
       addressController.text = data["address"] ?? "";
+      photoUrl = data["photoUrl"];
     }
 
     setState(() {
@@ -51,14 +58,57 @@ class _ProfileScreenState extends State<ProfileScreen> {
         .collection("users")
         .doc(user!.uid)
         .set({
-      "email": user!.email,
       "username": usernameController.text,
       "phone": phoneController.text,
       "address": addressController.text,
+      "photoUrl": photoUrl,
     }, SetOptions(merge: true));
+
+    setState(() {
+      isEditing = false;
+    });
 
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text("Profile Updated ✅")),
+    );
+  }
+
+  Future<void> pickImage() async {
+    final picker = ImagePicker();
+    final picked = await picker.pickImage(source: ImageSource.gallery);
+
+    if (picked == null || user == null) return;
+
+    final file = File(picked.path);
+
+    setState(() {
+      _imageFile = file;
+    });
+
+    /// Upload to Firebase Storage
+    final ref = FirebaseStorage.instance
+        .ref()
+        .child("profile_pictures")
+        .child("${user!.uid}.jpg");
+
+    await ref.putFile(file);
+
+    final downloadUrl = await ref.getDownloadURL();
+
+    /// Save URL to Firestore
+    await FirebaseFirestore.instance
+        .collection("users")
+        .doc(user!.uid)
+        .update({
+      "photoUrl": downloadUrl,
+    });
+
+    setState(() {
+      photoUrl = downloadUrl;
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text("Profile picture updated 📸")),
     );
   }
 
@@ -73,6 +123,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text("Profile"),
+        actions: [
+          IconButton(
+            icon: Icon(isEditing ? Icons.close : Icons.edit),
+            onPressed: () {
+              setState(() {
+                isEditing = !isEditing;
+              });
+            },
+          )
+        ],
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
@@ -80,15 +140,25 @@ class _ProfileScreenState extends State<ProfileScreen> {
           children: [
 
             /// Profile Avatar
-            const CircleAvatar(
-              radius: 50,
-              backgroundColor: Colors.green,
-              child: Icon(Icons.person, size: 50, color: Colors.white),
+            GestureDetector(
+              onTap: isEditing ? pickImage : null,
+              child: CircleAvatar(
+                radius: 55,
+                backgroundColor: Colors.green,
+                backgroundImage: _imageFile != null
+                    ? FileImage(_imageFile!)
+                    : (photoUrl != null
+                    ? NetworkImage(photoUrl!) as ImageProvider
+                    : null),
+                child: (_imageFile == null && photoUrl == null)
+                    ? const Icon(Icons.person, size: 55, color: Colors.white)
+                    : null,
+              ),
             ),
 
-            const SizedBox(height: 20),
 
-            /// Email (read-only)
+            const SizedBox(height: 15),
+
             Text(
               user?.email ?? "",
               style: const TextStyle(fontSize: 16),
@@ -97,55 +167,73 @@ class _ProfileScreenState extends State<ProfileScreen> {
             const SizedBox(height: 30),
 
             /// Username
-            TextField(
+            isEditing
+                ? TextField(
               controller: usernameController,
-              decoration: const InputDecoration(
-                labelText: "Username",
-              ),
+              decoration:
+              const InputDecoration(labelText: "Username"),
+            )
+                : ListTile(
+              title: const Text("Username"),
+              subtitle: Text(usernameController.text),
             ),
-
-            const SizedBox(height: 15),
 
             /// Phone
-            TextField(
+            isEditing
+                ? TextField(
               controller: phoneController,
               keyboardType: TextInputType.phone,
-              decoration: const InputDecoration(
-                labelText: "Phone Number",
-              ),
+              decoration:
+              const InputDecoration(labelText: "Phone"),
+            )
+                : ListTile(
+              title: const Text("Phone"),
+              subtitle: Text(phoneController.text),
             ),
-
-            const SizedBox(height: 15),
 
             /// Address
-            TextField(
+            isEditing
+                ? TextField(
               controller: addressController,
               maxLines: 2,
-              decoration: const InputDecoration(
-                labelText: "Address",
-              ),
+              decoration:
+              const InputDecoration(labelText: "Address"),
+            )
+                : ListTile(
+              title: const Text("Address"),
+              subtitle: Text(addressController.text),
             ),
 
-            const SizedBox(height: 25),
+            const SizedBox(height: 30),
 
-            /// Save Button
-            ElevatedButton(
-              onPressed: saveProfile,
-              child: const Text("Save Profile"),
-            ),
+            /// Buttons Row
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
 
-            const SizedBox(height: 20),
+                if (isEditing)
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: saveProfile,
+                      child: const Text("Save"),
+                    ),
+                  ),
 
-            /// Logout
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red,
-              ),
-              onPressed: () async {
-                await FirebaseAuth.instance.signOut();
-                Navigator.pop(context);
-              },
-              child: const Text("Logout"),
+                const SizedBox(width: 15),
+
+                Expanded(
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.red,
+                    ),
+                    onPressed: () async {
+                      await FirebaseAuth.instance.signOut();
+                      Navigator.pop(context);
+                    },
+                    child: const Text("Logout"),
+                  ),
+                ),
+              ],
             ),
           ],
         ),
