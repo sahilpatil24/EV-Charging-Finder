@@ -4,9 +4,12 @@ import 'package:geolocator/geolocator.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:firebase_auth/firebase_auth.dart';
 import 'screens/login_screen.dart';
-
+import 'screens/favorites_screen.dart';
+import 'screens/profile_screen.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -80,6 +83,8 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   static const String apiKey = "b158c085-25b6-423d-b166-afb61865b11a";
+  List<Map<String, dynamic>> _favoriteStations = [];
+  bool _isFavorite = false;
   GoogleMapController? _mapController;
   LatLng? _currentPosition;
   Set<Marker> _markers = {};
@@ -88,14 +93,26 @@ class _HomeScreenState extends State<HomeScreen> {
   //store selected station
   Map<String, dynamic>? _selectedStation;
 
-  void _selectStation(Map<String, dynamic> station) {
+  void _selectStation(Map<String, dynamic> station) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    final doc = await FirebaseFirestore.instance
+        .collection("users")
+        .doc(user.uid)
+        .collection("favorites")
+        .doc(station["ID"].toString())
+        .get();
+
     setState(() {
       _selectedStation = station;
+      _isFavorite = doc.exists;
     });
   }
 
 
   final Color primaryGreen = const Color(0xFF12B886);
+
 
   @override
   void initState() {
@@ -191,63 +208,6 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  // Future<void> fetchStations(double lat, double lon) async {
-  //
-  //   final url = Uri.parse(
-  //       "https://api.openchargemap.io/v3/poi/"
-  //           "?output=json"
-  //           "&latitude=$lat"
-  //           "&longitude=$lon"
-  //           "&distance=5"
-  //           "&distanceunit=KM"
-  //           "&maxresults=20"
-  //   );
-  //
-  //   final response = await http.get(
-  //     url,
-  //     headers: {
-  //       "X-API-Key": apiKey,
-  //       "Content-Type": "application/json",
-  //     },
-  //   );
-  //
-  //   if (response.statusCode == 200) {
-  //     final data = jsonDecode(response.body);
-  //
-  //     Set<Marker> newMarkers = {};
-  //
-  //     for (var station in data) {
-  //       final info = station["AddressInfo"];
-  //       if (info != null &&
-  //           info["Latitude"] != null &&
-  //           info["Longitude"] != null) {
-  //
-  //         newMarkers.add(
-  //           Marker(
-  //             markerId: MarkerId(info["Title"] ?? "Station"),
-  //             position: LatLng(
-  //               info["Latitude"],
-  //               info["Longitude"],
-  //             ),
-  //             infoWindow: InfoWindow(
-  //               title: info["Title"] ?? "Charging Station",
-  //               snippet: info["AddressLine1"] ?? "No address",
-  //             ),
-  //             icon: BitmapDescriptor.defaultMarkerWithHue(
-  //               BitmapDescriptor.hueGreen,
-  //             ),
-  //           ),
-  //         );
-  //       }
-  //     }
-  //
-  //     setState(() {
-  //       _markers = newMarkers;
-  //     });
-  //     print("Stations count: ${data.length}");
-  //
-  //   }
-  // }
 
   Future<void> _getCurrentLocation() async {
     await Permission.location.request();
@@ -308,13 +268,61 @@ class _HomeScreenState extends State<HomeScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
+
+              // ❤️ Add to Favorites
               ElevatedButton.icon(
-                onPressed: () {
-                  print("Added to favourites");
+                onPressed: _isFavorite
+                    ? null
+                    : () async {
+                  final user = FirebaseAuth.instance.currentUser;
+                  if (user == null) return;
+
+                  final info = _selectedStation!["AddressInfo"];
+                  final connections = _selectedStation!["Connections"];
+
+                  String connector = "Unknown";
+                  String power = "Unknown";
+
+                  if (connections != null && connections.isNotEmpty) {
+                    connector =
+                        connections[0]["ConnectionType"]?["Title"] ?? "Unknown";
+                    power = connections[0]["PowerKW"]?.toString() ?? "Unknown";
+                  }
+
+                  await FirebaseFirestore.instance
+                      .collection("users")
+                      .doc(user.uid)
+                      .collection("favorites")
+                      .doc(_selectedStation!["ID"].toString())
+                      .set({
+                    "title": info["Title"],
+                    "address": info["AddressLine1"],
+                    "latitude": info["Latitude"],
+                    "longitude": info["Longitude"],
+                    "connector": connector,
+                    "power": power,
+                    "createdAt": FieldValue.serverTimestamp(),
+                  });
+
+                  setState(() {
+                    _isFavorite = true;
+                  });
+
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text("Added to Favorites ❤️"),
+                    ),
+                  );
                 },
-                icon: const Icon(Icons.favorite),
-                label: const Text("Add to Favourites"),
+                icon: Icon(
+                  _isFavorite ? Icons.favorite : Icons.favorite_border,
+                ),
+                label: Text(
+                  _isFavorite ? "Added" : "Add to Favourites",
+                ),
               ),
+
+              // ❌ Close card
               IconButton(
                 onPressed: () {
                   setState(() {
@@ -322,7 +330,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   });
                 },
                 icon: const Icon(Icons.close),
-              )
+              ),
             ],
           )
         ],
@@ -333,13 +341,28 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      // appBar: AppBar(
+      //   backgroundColor: primaryGreen,
+      //   title: const Text(
+      //     '⚡ EV Charging Finder',
+      //     style: TextStyle(color: Colors.white),
+      //   ),
+      //   elevation: 0,
+      // ),
       appBar: AppBar(
-        backgroundColor: primaryGreen,
-        title: const Text(
-          '⚡ EV Charging Finder',
-          style: TextStyle(color: Colors.white),
-        ),
-        elevation: 0,
+        title: const Text("EV Charging Finder"),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.logout),
+            onPressed: () async {
+              await FirebaseAuth.instance.signOut();
+              Navigator.pushReplacement(
+                context,
+                MaterialPageRoute(builder: (_) => const LoginScreen()),
+              );
+            },
+          ),
+        ],
       ),
       body: _currentPosition == null
           ? const Center(child: CircularProgressIndicator())
@@ -393,31 +416,59 @@ class _HomeScreenState extends State<HomeScreen> {
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(30),
+
+                // 🔽 Remove this if you don’t like the shadow
                 boxShadow: [
                   BoxShadow(
                     color: Colors.black.withOpacity(0.15),
-                    blurRadius: 8,
-                  )
+                    blurRadius: 15,
+                    offset: const Offset(0, 5),
+                  ),
                 ],
               ),
-              child: const TextField(
-                decoration: InputDecoration(
-                  hintText: "Search charging stations...",
-                  border: InputBorder.none,
-                  icon: Icon(Icons.search),
+              child: Theme(
+                data: Theme.of(context).copyWith(
+                  inputDecorationTheme: const InputDecorationTheme(
+                    filled: false,
+                  ),
+                ),
+                child: const TextField(
+                  style: TextStyle(color: Colors.black),
+                  cursorColor: Colors.green,
+                  decoration: InputDecoration(
+                    hintText: "Search charging stations...",
+                    hintStyle: TextStyle(color: Colors.grey),
+                    border: InputBorder.none,
+                    enabledBorder: InputBorder.none,
+                    focusedBorder: InputBorder.none,
+                    icon: Icon(Icons.search, color: Colors.grey),
+                    isDense: true,
+                  ),
                 ),
               ),
             ),
-          ),
+          )
         ],
       ),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _selectedIndex,
         selectedItemColor: primaryGreen,
         onTap: (index) {
-          setState(() {
-            _selectedIndex = index;
-          });
+          if (index == 1) {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => const FavoritesScreen(),
+              ),
+            );
+          } else if (index == 2) {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => const ProfileScreen(),
+              ),
+            );
+          }
         },
         items: const [
           BottomNavigationBarItem(
