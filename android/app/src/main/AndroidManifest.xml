@@ -9,16 +9,20 @@
     android:label="ev_charging_finder"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
+        <!-- Stripe return URL scheme -->
+        <activity
+            android:name="com.stripe.android.paymentsheet.PaymentSheetContractV2"
+            android:exported="true" />
         <meta-data
             android:name="com.google.android.geo.API_KEY"
             android:value="AIzaSyAMBXbEmgd4Sa-Xn8lFNDT9jqwdsCnd_jA"/>
 
         <activity
             android:name=".MainActivity"
+            android:theme="@style/NormalTheme"
             android:exported="true"
             android:launchMode="singleTop"
             android:taskAffinity=""
-            android:theme="@style/LaunchTheme"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
             android:hardwareAccelerated="true"
             android:windowSoftInputMode="adjustResize">
