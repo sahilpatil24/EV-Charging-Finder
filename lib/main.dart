@@ -8,6 +8,10 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'screens/login_screen.dart';
 import 'screens/favorites_screen.dart';
 import 'screens/profile_screen.dart';
+import 'screens/my_bookings_screen.dart';
+import 'screens/alerts_screen.dart';
+import 'screens/request_station_screen.dart';
+import 'screens/admin_dashboard_screen.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'services/payment_service.dart';
@@ -73,10 +77,14 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   LatLng? _currentPosition;
   Set<Marker> _markers = {};
   int _selectedIndex = 0;
+  bool _isAdmin = false;
 
   Map<String, dynamic>? _selectedStation;
   bool _isFavorite = false;
   bool _cardVisible = false;
+
+  // Unread alerts badge count
+  int _unreadAlerts = 0;
 
   late AnimationController _cardAnimController;
   late Animation<Offset> _cardSlide;
@@ -97,23 +105,20 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       begin: const Offset(0, 1.2),
       end: Offset.zero,
     ).animate(CurvedAnimation(
-      parent: _cardAnimController,
-      curve: Curves.easeOutCubic,
-    ));
+        parent: _cardAnimController, curve: Curves.easeOutCubic));
     _cardFade = CurvedAnimation(
-      parent: _cardAnimController,
-      curve: Curves.easeOut,
-    );
+        parent: _cardAnimController, curve: Curves.easeOut);
 
     _pulseController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1000),
     )..repeat(reverse: true);
     _pulseAnim = Tween<double>(begin: 0.95, end: 1.05).animate(
-      CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
-    );
+        CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut));
 
     _getCurrentLocation();
+    _checkAdminStatus();
+    _listenAlertCount();
   }
 
   @override
@@ -121,6 +126,21 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     _cardAnimController.dispose();
     _pulseController.dispose();
     super.dispose();
+  }
+
+  Future<void> _checkAdminStatus() async {
+    final admin = await BookingService.isAdmin();
+    if (mounted) setState(() => _isAdmin = admin);
+  }
+
+  void _listenAlertCount() {
+    FirebaseFirestore.instance
+        .collection('alerts')
+        .where('isActive', isEqualTo: true)
+        .snapshots()
+        .listen((snap) {
+      if (mounted) setState(() => _unreadAlerts = snap.docs.length);
+    });
   }
 
   Future<void> _selectStation(Map<String, dynamic> station) async {
@@ -139,7 +159,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       _isFavorite = doc.exists;
       _cardVisible = true;
     });
-
     _cardAnimController.forward(from: 0);
   }
 
@@ -180,18 +199,37 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           if (info != null &&
               info["Latitude"] != null &&
               info["Longitude"] != null) {
-            newMarkers.add(
-              Marker(
-                markerId: MarkerId(station["ID"].toString()),
-                position: LatLng(
-                  (info["Latitude"] as num).toDouble(),
-                  (info["Longitude"] as num).toDouble(),
-                ),
-                icon: BitmapDescriptor.defaultMarkerWithHue(
-                    BitmapDescriptor.hueGreen),
-                onTap: () => _selectStation(station),
+            newMarkers.add(Marker(
+              markerId: MarkerId(station["ID"].toString()),
+              position: LatLng(
+                (info["Latitude"] as num).toDouble(),
+                (info["Longitude"] as num).toDouble(),
               ),
-            );
+              icon: BitmapDescriptor.defaultMarkerWithHue(
+                  BitmapDescriptor.hueGreen),
+              onTap: () => _selectStation(station),
+            ));
+          }
+        }
+
+        // Also load manually-added stations from Firestore
+        final manualSnap = await FirebaseFirestore.instance
+            .collection('stations')
+            .where('isManuallyAdded', isEqualTo: true)
+            .get();
+
+        for (final doc in manualSnap.docs) {
+          final d = doc.data();
+          final mlat = (d['latitude'] as num?)?.toDouble();
+          final mlng = (d['longitude'] as num?)?.toDouble();
+          if (mlat != null && mlng != null) {
+            newMarkers.add(Marker(
+              markerId: MarkerId('manual_${doc.id}'),
+              position: LatLng(mlat, mlng),
+              icon: BitmapDescriptor.defaultMarkerWithHue(
+                  BitmapDescriptor.hueBlue),
+              onTap: () => _selectManualStation(doc.id, d),
+            ));
           }
         }
 
@@ -199,13 +237,33 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
         if (_mapController != null && newMarkers.isNotEmpty) {
           _mapController!.animateCamera(
-            CameraUpdate.newLatLngZoom(newMarkers.first.position, 13),
-          );
+              CameraUpdate.newLatLngZoom(newMarkers.first.position, 13));
         }
       }
     } catch (e) {
       debugPrint("Fetch error: $e");
     }
+  }
+
+  // Tap handler for manually-added stations (Firestore format, not OCM format)
+  void _selectManualStation(String docId, Map<String, dynamic> d) {
+    final synthetic = {
+      'ID': docId,
+      'AddressInfo': {
+        'Title': d['title'],
+        'AddressLine1': d['address'],
+        'Latitude': d['latitude'],
+        'Longitude': d['longitude'],
+      },
+      'Connections': [
+        {
+          'ConnectionType': {'Title': d['connectorType']},
+          'PowerKW': d['powerKW'],
+        }
+      ],
+      '_isManual': true,
+    };
+    _selectStation(synthetic);
   }
 
   Future<void> _getCurrentLocation() async {
@@ -240,8 +298,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       await ref.delete();
       setState(() => _isFavorite = false);
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text("Removed from Favorites")));
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("Removed from Favorites")));
       }
     } else {
       await ref.set({
@@ -255,26 +313,19 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       });
       setState(() => _isFavorite = true);
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text("Added to Favorites ❤️")));
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("Added to Favorites ❤️")));
       }
     }
   }
 
-  // ── THE FIXED BOOKING FLOW ─────────────────────────────────────────────────
-  // Stage 1: init happens INSIDE the sheet (backend call + Stripe init)
-  // Stage 2: sheet closes itself
-  // Stage 3: onReadyToPay fires from HomeScreen (root context) → presentSheet()
-  // Stage 4: Firestore write
-  // Stage 5: confirmation screen
-  // ──────────────────────────────────────────────────────────────────────────
+  // ── BOOKING FLOW ───────────────────────────────────────────────────────────
   Future<void> _openBookingSheet() async {
     if (_selectedStation == null) return;
 
     final stationId = await BookingService.ensureStation(_selectedStation!);
     if (!mounted) return;
 
-    // Keep a local copy — _selectedStation may change if user taps elsewhere
     final station = _selectedStation!;
 
     showModalBottomSheet(
@@ -282,9 +333,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (_) => DraggableScrollableSheet(
-        initialChildSize: 0.6,
+        initialChildSize: 0.65,
         minChildSize: 0.4,
-        maxChildSize: 0.92,
+        maxChildSize: 0.95,
         expand: false,
         builder: (_, __) => SlotBookingSheet(
           station: station,
@@ -296,19 +347,16 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             required int slotNumber,
             required double pricePerHour,
             required int durationHours,
+            required DateTime scheduledStart,
           }) async {
-            // Wait for bottom sheet dismiss animation to fully complete
-            // before Stripe tries to present its native Activity on Android
             await Future.delayed(const Duration(milliseconds: 600));
             if (!mounted) return;
 
             debugPrint('💳 Presenting Stripe payment sheet...');
-            // Stage 3 — Stripe sheet on root navigator (bottom sheet is gone)
             final paid = await PaymentService.presentSheet();
             debugPrint('💳 presentSheet returned: paid=$paid');
             if (!paid) return;
 
-            // Stage 4 — Firestore
             await BookingService.bookSlot(
               stationId: stationId,
               stationTitle: stationTitle,
@@ -317,11 +365,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               pricePerHour: pricePerHour,
               durationHours: durationHours,
               paymentIntentId: paymentIntentId,
+              scheduledStart: scheduledStart,
             );
 
             if (!mounted) return;
 
-            // Stage 5 — confirmation screen
             await Navigator.of(context).push(
               PageRouteBuilder(
                 opaque: false,
@@ -331,6 +379,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   slotNumber: slotNumber,
                   duration: durationHours,
                   totalAmount: pricePerHour * durationHours,
+                  scheduledStart: scheduledStart,
                 ),
                 transitionsBuilder: (_, anim, __, child) =>
                     FadeTransition(opacity: anim, child: child),
@@ -347,7 +396,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     final connections = _selectedStation!["Connections"];
     String connector = "Unknown", power = "Unknown";
     if (connections != null && (connections as List).isNotEmpty) {
-      connector = connections[0]["ConnectionType"]?["Title"] ?? "Unknown";
+      connector =
+          connections[0]["ConnectionType"]?["Title"] ?? "Unknown";
       power = connections[0]["PowerKW"]?.toString() ?? "Unknown";
     }
 
@@ -364,14 +414,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 color: const Color(0xFF00C853).withOpacity(0.25)),
             boxShadow: [
               BoxShadow(
-                color: const Color(0xFF00C853).withOpacity(0.08),
-                blurRadius: 24,
-                spreadRadius: 2,
-              ),
+                  color: const Color(0xFF00C853).withOpacity(0.08),
+                  blurRadius: 24,
+                  spreadRadius: 2),
               BoxShadow(
-                color: Colors.black.withOpacity(0.4),
-                blurRadius: 16,
-              ),
+                  color: Colors.black.withOpacity(0.4), blurRadius: 16),
             ],
           ),
           child: Column(
@@ -381,8 +428,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 height: 4,
                 decoration: const BoxDecoration(
                   gradient: LinearGradient(
-                    colors: [Color(0xFF00C853), Color(0xFF12B886)],
-                  ),
+                      colors: [Color(0xFF00C853), Color(0xFF12B886)]),
                   borderRadius:
                   BorderRadius.vertical(top: Radius.circular(20)),
                 ),
@@ -392,84 +438,77 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
-                      children: [
-                        ScaleTransition(
-                          scale: _pulseAnim,
-                          child: Container(
-                            padding: const EdgeInsets.all(8),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF00C853).withOpacity(0.15),
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: const Icon(Icons.ev_station,
-                                color: Color(0xFF00C853), size: 20),
+                    Row(children: [
+                      ScaleTransition(
+                        scale: _pulseAnim,
+                        child: Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF00C853).withOpacity(0.15),
+                            borderRadius: BorderRadius.circular(10),
                           ),
+                          child: const Icon(Icons.ev_station,
+                              color: Color(0xFF00C853), size: 20),
                         ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            info["Title"] ?? "Charging Station",
-                            style: const TextStyle(
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          info["Title"] ?? "Charging Station",
+                          style: const TextStyle(
                               color: Colors.white,
                               fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
+                              fontWeight: FontWeight.bold),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
-                        IconButton(
-                          onPressed: _closeCard,
-                          icon: const Icon(Icons.close,
-                              color: Colors.white54, size: 20),
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(),
-                        ),
-                      ],
-                    ),
+                      ),
+                      IconButton(
+                        onPressed: _closeCard,
+                        icon: const Icon(Icons.close,
+                            color: Colors.white54, size: 20),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                      ),
+                    ]),
                     const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        _InfoChip(
-                            icon: Icons.cable_rounded, label: connector),
-                        const SizedBox(width: 8),
-                        _InfoChip(
-                          icon: Icons.bolt_rounded,
-                          label: "$power kW",
-                          color: const Color(0xFFFFD600),
-                        ),
-                      ],
-                    ),
+                    Row(children: [
+                      _InfoChip(
+                          icon: Icons.cable_rounded, label: connector),
+                      const SizedBox(width: 8),
+                      _InfoChip(
+                        icon: Icons.bolt_rounded,
+                        label: "$power kW",
+                        color: const Color(0xFFFFD600),
+                      ),
+                    ]),
                     const SizedBox(height: 14),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: _ActionButton(
-                            icon: _isFavorite
-                                ? Icons.favorite_rounded
-                                : Icons.favorite_border_rounded,
-                            label: _isFavorite ? "Saved" : "Save",
-                            color: _isFavorite
-                                ? Colors.redAccent
-                                : Colors.white70,
-                            onTap: _toggleFavorite,
-                            filled: false,
-                          ),
+                    Row(children: [
+                      Expanded(
+                        child: _ActionButton(
+                          icon: _isFavorite
+                              ? Icons.favorite_rounded
+                              : Icons.favorite_border_rounded,
+                          label: _isFavorite ? "Saved" : "Save",
+                          color: _isFavorite
+                              ? Colors.redAccent
+                              : Colors.white70,
+                          onTap: _toggleFavorite,
+                          filled: false,
                         ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          flex: 2,
-                          child: _ActionButton(
-                            icon: Icons.calendar_month_rounded,
-                            label: "Book a Slot",
-                            color: Colors.black,
-                            onTap: _openBookingSheet,
-                            filled: true,
-                          ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        flex: 2,
+                        child: _ActionButton(
+                          icon: Icons.calendar_month_rounded,
+                          label: "Book a Slot",
+                          color: Colors.black,
+                          onTap: _openBookingSheet,
+                          filled: true,
                         ),
-                      ],
-                    ),
+                      ),
+                    ]),
                   ],
                 ),
               ),
@@ -487,26 +526,43 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
-        title: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                color: const Color(0xFF00C853).withOpacity(0.15),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: const Icon(Icons.electric_bolt,
-                  color: Color(0xFF00C853), size: 18),
+        title: Row(children: [
+          Container(
+            padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(
+              color: const Color(0xFF00C853).withOpacity(0.15),
+              borderRadius: BorderRadius.circular(8),
             ),
-            const SizedBox(width: 8),
-            const Text(
-              "EV Finder",
+            child: const Icon(Icons.electric_bolt,
+                color: Color(0xFF00C853), size: 18),
+          ),
+          const SizedBox(width: 8),
+          const Text("EV Finder",
               style: TextStyle(
-                  color: Colors.white, fontWeight: FontWeight.bold),
-            ),
-          ],
-        ),
+                  color: Colors.white, fontWeight: FontWeight.bold)),
+        ]),
         actions: [
+          // Request station button
+          IconButton(
+            icon: const Icon(Icons.add_location_alt_rounded,
+                color: Colors.white70),
+            tooltip: 'Request a Station',
+            onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                    builder: (_) => const RequestStationScreen())),
+          ),
+          // Admin dashboard (only visible to admins)
+          if (_isAdmin)
+            IconButton(
+              icon: const Icon(Icons.admin_panel_settings_rounded,
+                  color: Color(0xFF00C853)),
+              tooltip: 'Admin Dashboard',
+              onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      builder: (_) => const AdminDashboardScreen())),
+            ),
           IconButton(
             icon: const Icon(Icons.logout, color: Colors.white70),
             onPressed: () async {
@@ -535,21 +591,16 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         children: [
           GoogleMap(
             initialCameraPosition: CameraPosition(
-              target: _currentPosition!,
-              zoom: 15,
-            ),
+                target: _currentPosition!, zoom: 15),
             myLocationEnabled: true,
             myLocationButtonEnabled: false,
             markers: _markers,
             onMapCreated: (c) => _mapController = c,
-            onTap: (_) {
-              if (_cardVisible) _closeCard();
-            },
+            onTap: (_) { if (_cardVisible) _closeCard(); },
           ),
           Positioned(
             top: kToolbarHeight +
-                MediaQuery.of(context).padding.top +
-                8,
+                MediaQuery.of(context).padding.top + 8,
             left: 16,
             right: 16,
             child: Container(
@@ -560,17 +611,15 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 border: Border.all(color: Colors.white10),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withOpacity(0.3),
-                    blurRadius: 12,
-                    offset: const Offset(0, 4),
-                  ),
+                      color: Colors.black.withOpacity(0.3),
+                      blurRadius: 12,
+                      offset: const Offset(0, 4)),
                 ],
               ),
               child: Theme(
                 data: Theme.of(context).copyWith(
-                  inputDecorationTheme:
-                  const InputDecorationTheme(filled: false),
-                ),
+                    inputDecorationTheme:
+                    const InputDecorationTheme(filled: false)),
                 child: const TextField(
                   style: TextStyle(color: Colors.white),
                   cursorColor: Color(0xFF00C853),
@@ -601,9 +650,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 onPressed: () {
                   if (_currentPosition != null) {
                     _mapController?.animateCamera(
-                      CameraUpdate.newLatLngZoom(
-                          _currentPosition!, 15),
-                    );
+                        CameraUpdate.newLatLngZoom(
+                            _currentPosition!, 15));
                   }
                 },
                 child: const Icon(Icons.my_location,
@@ -625,38 +673,66 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         indicatorColor: const Color(0xFF00C853).withOpacity(0.2),
         selectedIndex: _selectedIndex,
         onDestinationSelected: (index) {
+          if (index == _selectedIndex && index == 0) return;
           setState(() => _selectedIndex = index);
+
           if (index == 1) {
-            Navigator.push(
-                context,
-                MaterialPageRoute(
-                    builder: (_) => const FavoritesScreen()));
+            Navigator.push(context,
+                MaterialPageRoute(builder: (_) => const MyBookingsScreen()))
+                .then((_) => setState(() => _selectedIndex = 0));
           } else if (index == 2) {
-            Navigator.push(
-                context,
-                MaterialPageRoute(
-                    builder: (_) => const ProfileScreen()));
+            Navigator.push(context,
+                MaterialPageRoute(builder: (_) => const AlertsScreen()))
+                .then((_) => setState(() => _selectedIndex = 0));
+          } else if (index == 3) {
+            Navigator.push(context,
+                MaterialPageRoute(builder: (_) => const FavoritesScreen()))
+                .then((_) => setState(() => _selectedIndex = 0));
+          } else if (index == 4) {
+            Navigator.push(context,
+                MaterialPageRoute(builder: (_) => const ProfileScreen()))
+                .then((_) => setState(() => _selectedIndex = 0));
           }
         },
-        destinations: const [
-          NavigationDestination(
+        destinations: [
+          const NavigationDestination(
             icon: Icon(Icons.map_outlined, color: Colors.white54),
-            selectedIcon:
-            Icon(Icons.map, color: Color(0xFF00C853)),
+            selectedIcon: Icon(Icons.map, color: Color(0xFF00C853)),
             label: 'Map',
           ),
-          NavigationDestination(
-            icon: Icon(Icons.favorite_border_rounded,
-                color: Colors.white54),
-            selectedIcon: Icon(Icons.favorite_rounded,
-                color: Color(0xFF00C853)),
-            label: 'Favorites',
+          const NavigationDestination(
+            icon: Icon(Icons.book_online_outlined, color: Colors.white54),
+            selectedIcon:
+            Icon(Icons.book_online, color: Color(0xFF00C853)),
+            label: 'Bookings',
           ),
           NavigationDestination(
+            icon: Badge(
+              isLabelVisible: _unreadAlerts > 0,
+              label: Text('$_unreadAlerts'),
+              child: const Icon(Icons.notifications_outlined,
+                  color: Colors.white54),
+            ),
+            selectedIcon: Badge(
+              isLabelVisible: _unreadAlerts > 0,
+              label: Text('$_unreadAlerts'),
+              child: const Icon(Icons.notifications_active_rounded,
+                  color: Color(0xFFFFB300)),
+            ),
+            label: 'Alerts',
+          ),
+          const NavigationDestination(
+            icon: Icon(Icons.favorite_border_rounded,
+                color: Colors.white54),
+            selectedIcon:
+            Icon(Icons.favorite_rounded, color: Color(0xFF00C853)),
+            label: 'Favorites',
+          ),
+          const NavigationDestination(
             icon: Icon(Icons.person_outline_rounded,
                 color: Colors.white54),
-            selectedIcon: Icon(Icons.person_rounded,
-                color: Color(0xFF00C853)),
+            selectedIcon:
+            Icon(Icons.person_rounded, color: Color(0xFF00C853)),
             label: 'Profile',
           ),
         ],
@@ -669,12 +745,10 @@ class _InfoChip extends StatelessWidget {
   final IconData icon;
   final String label;
   final Color color;
-
-  const _InfoChip({
-    required this.icon,
-    required this.label,
-    this.color = const Color(0xFF00C853),
-  });
+  const _InfoChip(
+      {required this.icon,
+        required this.label,
+        this.color = const Color(0xFF00C853)});
 
   @override
   Widget build(BuildContext context) {
@@ -685,18 +759,13 @@ class _InfoChip extends StatelessWidget {
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: color.withOpacity(0.3)),
       ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, color: color, size: 13),
-          const SizedBox(width: 5),
-          Text(label,
-              style: TextStyle(
-                  color: color,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600)),
-        ],
-      ),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(icon, color: color, size: 13),
+        const SizedBox(width: 5),
+        Text(label,
+            style: TextStyle(
+                color: color, fontSize: 12, fontWeight: FontWeight.w600)),
+      ]),
     );
   }
 }
@@ -707,7 +776,6 @@ class _ActionButton extends StatelessWidget {
   final Color color;
   final VoidCallback onTap;
   final bool filled;
-
   const _ActionButton({
     required this.icon,
     required this.label,
@@ -729,21 +797,17 @@ class _ActionButton extends StatelessWidget {
               : const Color(0xFF1E293B),
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
-            color: filled ? Colors.transparent : Colors.white12,
-          ),
+              color: filled ? Colors.transparent : Colors.white12),
         ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, size: 16, color: color),
-            const SizedBox(width: 6),
-            Text(label,
-                style: TextStyle(
-                    color: color,
-                    fontWeight: FontWeight.w600,
-                    fontSize: 13)),
-          ],
-        ),
+        child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+          Icon(icon, size: 16, color: color),
+          const SizedBox(width: 6),
+          Text(label,
+              style: TextStyle(
+                  color: color,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 13)),
+        ]),
       ),
     );
   }

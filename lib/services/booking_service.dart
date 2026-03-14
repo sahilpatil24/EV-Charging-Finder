@@ -1,46 +1,10 @@
-
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-
-/// ─────────────────────────────────────────────
-///  FIRESTORE SCHEMA
-/// ─────────────────────────────────────────────
-///
-///  stations/{stationId}                        ← mirrored from OpenChargeMap
-///    - title          : String
-///    - address        : String
-///    - latitude       : double
-///    - longitude      : double
-///    - connectorType  : String
-///    - powerKW        : String
-///    - createdAt      : Timestamp
-///
-///  stations/{stationId}/slots/{slotId}
-///    - slotNumber     : int      (1, 2, 3 …)
-///    - status         : String   ('available' | 'booked' | 'maintenance')
-///    - connectorType  : String
-///    - powerKW        : String
-///    - pricePerHour   : double   (e.g. 50.0 = ₹50/hr)
-///
-///  bookings/{bookingId}
-///    - userId         : String
-///    - stationId      : String
-///    - stationTitle   : String
-///    - slotId         : String
-///    - slotNumber     : int
-///    - startTime      : Timestamp
-///    - endTime        : Timestamp
-///    - durationHours  : int
-///    - totalAmount    : double
-///    - paymentStatus  : String  ('pending' | 'paid' | 'failed')
-///    - paymentIntentId: String  (from Stripe backend — set after payment)
-///    - createdAt      : Timestamp
-/// ─────────────────────────────────────────────
 
 class BookingService {
   static final _db = FirebaseFirestore.instance;
 
-  // ── Ensure station document exists (upsert) ──────────────────────────────
+  // ── Ensure station document exists (upsert from OCM data) ─────────────────
   static Future<String> ensureStation(Map<String, dynamic> station) async {
     final stationId = station['ID'].toString();
     final info = station['AddressInfo'];
@@ -64,17 +28,17 @@ class BookingService {
         'longitude': (info['Longitude'] as num).toDouble(),
         'connectorType': connector,
         'powerKW': power,
+        'isManuallyAdded': false,
         'createdAt': FieldValue.serverTimestamp(),
       });
 
-      // Seed 3 default slots
       for (int i = 1; i <= 3; i++) {
         await ref.collection('slots').add({
           'slotNumber': i,
           'status': 'available',
           'connectorType': connector,
           'powerKW': power,
-          'pricePerHour': 50.0, // ₹50 default
+          'pricePerHour': 50.0,
         });
       }
     }
@@ -82,7 +46,7 @@ class BookingService {
     return stationId;
   }
 
-  // ── Fetch slots for a station (real-time stream) ─────────────────────────
+  // ── Fetch slots for a station ─────────────────────────────────────────────
   static Stream<QuerySnapshot> slotsStream(String stationId) {
     return _db
         .collection('stations')
@@ -92,7 +56,32 @@ class BookingService {
         .snapshots();
   }
 
-  // ── Book a slot ───────────────────────────────────────────────────────────
+  // ── Check if a slot is available for a given time window ──────────────────
+  static Future<bool> isSlotAvailableAt({
+    required String stationId,
+    required String slotId,
+    required DateTime startTime,
+    required DateTime endTime,
+  }) async {
+    final snap = await _db
+        .collection('bookings')
+        .where('stationId', isEqualTo: stationId)
+        .where('slotId', isEqualTo: slotId)
+        .where('paymentStatus', isEqualTo: 'paid')
+        .get();
+
+    for (final doc in snap.docs) {
+      final d = doc.data();
+      final bookedStart = (d['startTime'] as Timestamp).toDate();
+      final bookedEnd = (d['endTime'] as Timestamp).toDate();
+      if (startTime.isBefore(bookedEnd) && endTime.isAfter(bookedStart)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  // ── Book a slot with a scheduled start time ───────────────────────────────
   static Future<String> bookSlot({
     required String stationId,
     required String stationTitle,
@@ -101,28 +90,32 @@ class BookingService {
     required double pricePerHour,
     required int durationHours,
     required String paymentIntentId,
+    required DateTime scheduledStart,
   }) async {
     final user = FirebaseAuth.instance.currentUser!;
-    final now = DateTime.now();
-    final endTime = now.add(Duration(hours: durationHours));
+    final endTime = scheduledStart.add(Duration(hours: durationHours));
     final totalAmount = pricePerHour * durationHours;
 
-    // 1. Mark slot as booked
-    await _db
-        .collection('stations')
-        .doc(stationId)
-        .collection('slots')
-        .doc(slotId)
-        .update({'status': 'booked'});
+    final available = await isSlotAvailableAt(
+      stationId: stationId,
+      slotId: slotId,
+      startTime: scheduledStart,
+      endTime: endTime,
+    );
+    if (!available) {
+      throw Exception(
+          'Slot is no longer available for the selected time. Please choose another slot or time.');
+    }
 
-    // 2. Create booking document
     final bookingRef = await _db.collection('bookings').add({
       'userId': user.uid,
       'stationId': stationId,
       'stationTitle': stationTitle,
       'slotId': slotId,
       'slotNumber': slotNumber,
-      'startTime': Timestamp.fromDate(now),
+      'scheduledDate':
+      '${scheduledStart.year}-${scheduledStart.month.toString().padLeft(2, '0')}-${scheduledStart.day.toString().padLeft(2, '0')}',
+      'startTime': Timestamp.fromDate(scheduledStart),
       'endTime': Timestamp.fromDate(endTime),
       'durationHours': durationHours,
       'totalAmount': totalAmount,
@@ -140,9 +133,15 @@ class BookingService {
     return _db
         .collection('bookings')
         .where('userId', isEqualTo: uid)
-        .orderBy('createdAt', descending: true)
+        .orderBy('startTime', descending: true)
         .snapshots();
   }
+
+  // ── Check if user is admin ────────────────────────────────────────────────
+  static Future<bool> isAdmin() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return false;
+    final doc = await _db.collection('admins').doc(uid).get();
+    return doc.exists;
+  }
 }
-
-
