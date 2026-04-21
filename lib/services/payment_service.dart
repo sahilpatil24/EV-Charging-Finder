@@ -7,15 +7,16 @@ class PaymentService {
   static const String publishableKey =
       'pk_test_51T7xbbBAzaxr8MBGthT4soGFhj7Fhpxgp6kP1h6LD33Zf1TKxYetNw5bs4BOIPkpTpOx2q1vL3vkX8vdme3dkilj00QFu72a2p';
 
-  static const String _baseUrl = 'http://10.0.2.2:3000';
+  // ✅ Render.com backend (works on real device + emulator)
+  static const String _baseUrl = 'https://ev-backend-lvka.onrender.com';
 
   static void init() {
     Stripe.publishableKey = publishableKey;
     // Do NOT set merchantIdentifier on Android — iOS Apple Pay only
   }
 
-  /// Step 1 only: hit backend, init PaymentSheet, return clientSecret.
-  /// Does NOT present the sheet — caller must close bottom sheet first.
+  /// Step 1: hit backend + init PaymentSheet. Called INSIDE bottom sheet.
+  /// Does NOT present the sheet — caller closes bottom sheet first.
   static Future<String> createAndInitPaymentSheet({
     required int amountInPaise,
     required String currency,
@@ -34,9 +35,9 @@ class PaymentService {
       }),
     )
         .timeout(
-      const Duration(seconds: 15),
+      const Duration(seconds: 20),
       onTimeout: () => throw Exception(
-          'Server timeout — is your Node backend running on port 3000?'),
+          'Server timeout — Render backend did not respond in time.'),
     );
 
     debugPrint('📬 Response ${response.statusCode}: ${response.body}');
@@ -54,7 +55,6 @@ class PaymentService {
         paymentIntentClientSecret: clientSecret,
         merchantDisplayName: 'EV Charging Finder',
         style: ThemeMode.dark,
-        // Remove shapes entirely
         appearance: PaymentSheetAppearance(
           colors: PaymentSheetAppearanceColors(
             primary: const Color(0xFF00C853),

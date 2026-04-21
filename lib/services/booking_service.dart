@@ -74,6 +74,7 @@ class BookingService {
       final d = doc.data();
       final bookedStart = (d['startTime'] as Timestamp).toDate();
       final bookedEnd = (d['endTime'] as Timestamp).toDate();
+      // Overlap: new start < existing end AND new end > existing start
       if (startTime.isBefore(bookedEnd) && endTime.isAfter(bookedStart)) {
         return false;
       }
@@ -96,6 +97,7 @@ class BookingService {
     final endTime = scheduledStart.add(Duration(hours: durationHours));
     final totalAmount = pricePerHour * durationHours;
 
+    // Race-condition guard — check again just before writing
     final available = await isSlotAvailableAt(
       stationId: stationId,
       slotId: slotId,
